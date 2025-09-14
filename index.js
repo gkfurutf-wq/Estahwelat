@@ -1,7 +1,6 @@
 const { Connection, PublicKey, Keypair, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 const bs58 = require('bs58').default;
 const express = require('express');
-const https = require('https');
 require('dotenv').config();
 
 class SolanaWebMonitor {
@@ -47,15 +46,8 @@ class SolanaWebMonitor {
         this.lastRpcErrorTime = new Array(this.rpcUrls.length).fill(0);
         this.rpcFailedWallets = new Set(); // Track wallets with failed RPCs
         
-        // UptimeRobot integration
-        this.uptimeRobotKey = process.env.UP_KEY;
-        this.uptimeRobotEnabled = !!this.uptimeRobotKey;
-        
         console.log('🌐 Solana Web Monitor initialized');
         console.log(`🔗 Available RPC URLs: ${this.rpcUrls.length}`);
-        if (this.uptimeRobotEnabled) {
-            console.log('📡 UptimeRobot integration enabled');
-        }
     }
     
     addLog(message, type = 'info') {
@@ -90,117 +82,6 @@ class SolanaWebMonitor {
         }
         
         this.addLog(message, type);
-        
-        // Send critical alerts to UptimeRobot
-        if (this.uptimeRobotEnabled && (type === 'error' || type === 'warning')) {
-            this.sendUptimeRobotAlert(message, type);
-        }
-    }
-    
-    async sendUptimeRobotAlert(message, type) {
-        if (!this.uptimeRobotEnabled) return;
-        
-        try {
-            const alertMessage = `[Solana Monitor ${type.toUpperCase()}] ${message}`;
-            
-            const postData = JSON.stringify({
-                api_key: this.uptimeRobotKey,
-                format: 'json',
-                alert_contacts: '1', // Send to all alert contacts
-                type: '1', // Custom alert
-                value: alertMessage
-            });
-            
-            const options = {
-                hostname: 'api.uptimerobot.com',
-                port: 443,
-                path: '/v2/newAlertContact',
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
-                }
-            };
-            
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => {
-                    data += chunk;
-                });
-                res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        console.log('📡 UptimeRobot alert sent successfully');
-                    }
-                });
-            });
-            
-            req.on('error', (error) => {
-                console.error('📡 UptimeRobot alert failed:', error.message);
-            });
-            
-            req.write(postData);
-            req.end();
-            
-        } catch (error) {
-            console.error('📡 UptimeRobot integration error:', error.message);
-        }
-    }
-    
-    async sendUptimeRobotHeartbeat() {
-        if (!this.uptimeRobotEnabled) return;
-        
-        try {
-            const statusData = {
-                wallets_count: this.wallets.length,
-                active_monitors: this.subscriptionIds.filter(id => id !== null).length,
-                failed_wallets: this.rpcFailedWallets.size,
-                total_errors: this.rpcErrorCounts.reduce((sum, count) => sum + count, 0),
-                timestamp: new Date().toISOString()
-            };
-            
-            const postData = JSON.stringify({
-                api_key: this.uptimeRobotKey,
-                format: 'json',
-                monitors: '1',
-                custom_uptime_ratios: '1',
-                logs: '1',
-                log_types: '1-2-98-99',
-                logs_start_date: Math.floor(Date.now() / 1000) - 3600
-            });
-            
-            const options = {
-                hostname: 'api.uptimerobot.com',
-                port: 443,
-                path: '/v2/getMonitors',
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
-                }
-            };
-            
-            const req = https.request(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => {
-                    data += chunk;
-                });
-                res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        console.log('📡 UptimeRobot heartbeat sent');
-                    }
-                });
-            });
-            
-            req.on('error', (error) => {
-                console.error('📡 UptimeRobot heartbeat failed:', error.message);
-            });
-            
-            req.write(postData);
-            req.end();
-            
-        } catch (error) {
-            console.error('📡 UptimeRobot heartbeat error:', error.message);
-        }
     }
     
     processPrivateKeys(keysText) {
@@ -1023,39 +904,6 @@ app.post('/api/stop', (req, res) => {
 
 app.get('/api/notifications', (req, res) => {
     res.json(monitor.notifications);
-});
-
-// UptimeRobot endpoints
-app.post('/api/uptimerobot/heartbeat', async (req, res) => {
-    try {
-        await monitor.sendUptimeRobotHeartbeat();
-        res.json({ 
-            success: true, 
-            message: 'UptimeRobot heartbeat sent',
-            enabled: monitor.uptimeRobotEnabled
-        });
-    } catch (error) {
-        res.json({ 
-            success: false, 
-            message: 'Failed to send UptimeRobot heartbeat',
-            error: error.message,
-            enabled: monitor.uptimeRobotEnabled
-        });
-    }
-});
-
-app.get('/api/uptimerobot/status', (req, res) => {
-    res.json({
-        enabled: monitor.uptimeRobotEnabled,
-        key_configured: !!monitor.uptimeRobotKey,
-        last_alert_time: new Date().toISOString(),
-        system_status: {
-            wallets: monitor.wallets.length,
-            active_monitors: monitor.subscriptionIds.filter(id => id !== null).length,
-            failed_wallets: monitor.rpcFailedWallets.size,
-            total_errors: monitor.rpcErrorCounts.reduce((sum, count) => sum + count, 0)
-        }
-    });
 });
 
 app.get('/health', (req, res) => {
