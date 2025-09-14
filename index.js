@@ -590,8 +590,11 @@ app.get('/', (req, res) => {
             font-family: monospace;
             font-size: 14px;
             white-space: pre-wrap;
+            word-break: break-all;
+            overflow-wrap: break-word;
             max-height: 300px;
             overflow-y: auto;
+            overflow-x: hidden;
             border: 2px solid #e9ecef;
         }
         
