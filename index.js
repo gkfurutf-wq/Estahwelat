@@ -604,10 +604,7 @@ app.get('/', (req, res) => {
             padding: 20px;
             max-height: 400px;
             overflow-y: auto;
-            overflow-x: hidden;
             border: 2px solid #e9ecef;
-            word-break: break-all;
-            overflow-wrap: break-word;
         }
         
         .notification {
