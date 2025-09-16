@@ -750,9 +750,10 @@ app.get('/', (req, res) => {
     <script>
         let updateInterval;
         
-        // Auto refresh notifications every 2 seconds
+        // Auto refresh disabled per user request
         function startAutoRefresh() {
-            updateInterval = setInterval(loadNotifications, 2000);
+            // updateInterval = setInterval(loadNotifications, 2000);
+            console.log('Auto refresh is disabled');
         }
         
         // Load notifications
@@ -879,7 +880,8 @@ app.get('/', (req, res) => {
         // Start auto refresh when page loads
         document.addEventListener('DOMContentLoaded', () => {
             loadNotifications();
-            startAutoRefresh();
+            // Auto refresh disabled - only load once on page load
+            // startAutoRefresh();
         });
     </script>
 </body>
