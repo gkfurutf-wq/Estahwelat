@@ -1,4 +1,4 @@
-const { Connection, PublicKey, Keypair, Transaction, SystemProgram, LAMPORTS_PER_SOL, ComputeBudgetProgram } = require('@solana/web3.js');
+const { Connection, PublicKey, Keypair, Transaction, SystemProgram, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 const bs58 = require('bs58').default;
 const express = require('express');
 require('dotenv').config();
@@ -218,7 +218,7 @@ class SolanaWebMonitor {
             const startTime = Date.now();
             
             const { blockhash } = await connection.getLatestBlockhash('confirmed');
-            const transactionFee = 5000 + 12500; // رسوم أساسية (5000) + Priority fees (12500)
+            const transactionFee = 5000;
             const amountToSend = amount - transactionFee;
             
             if (amountToSend <= 0) {
@@ -231,27 +231,12 @@ class SolanaWebMonitor {
                 feePayer: wallet.publicKey
             });
             
-            // إضافة Priority Fees للسرعة الخارقة (0.0000125 SOL = 12,500 lamports)
-            const computeUnitLimit = 500; // حد معقول للتحويل البسيط
-            const priorityFeePerTransaction = 12500; // 12,500 lamports
-            const microLamportsPerCU = Math.floor((priorityFeePerTransaction * 1_000_000) / computeUnitLimit); // 25,000,000 microLamports per CU
-            
-            const setComputeUnitLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
-                units: computeUnitLimit
-            });
-            
-            const priorityFeeInstruction = ComputeBudgetProgram.setComputeUnitPrice({
-                microLamports: microLamportsPerCU
-            });
-            
             const transferInstruction = SystemProgram.transfer({
                 fromPubkey: wallet.publicKey,
                 toPubkey: this.targetAddress,
                 lamports: amountToSend
             });
             
-            transaction.add(setComputeUnitLimitIx);
-            transaction.add(priorityFeeInstruction);
             transaction.add(transferInstruction);
             transaction.sign(wallet);
             
